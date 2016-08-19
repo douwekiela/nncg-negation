@@ -9,7 +9,7 @@ opt.gateSize = 300
 opt.hiddenSize = 600
 opt.jackknifeSize = 10
 opt.numEpochs = 10
-opt.batchSize = 1
+opt.batchSize = 8
 
 -- define gated network graph
 ---- declare inputs
