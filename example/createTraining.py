@@ -28,7 +28,7 @@ with open(outfile, 'w') as outf:
         vecs = []
         for neigh in gate_dict[w]:
             vecs.append(gate_dict[w][neigh])
-        outf.write("traindata[" +  str(cntr) + "] = {torch.Tensor({")
+        outf.write("traindata[" +  str(cntr) + "] = {'" + w + "', torch.Tensor({")    # include the input word
         for x in embeddings[w]:                    # input word vector
             outf.write(str(x) + ",")
         outf.write("}), torch.Tensor({")

@@ -8,7 +8,7 @@ opt.embedSize = 300
 opt.gateSize = 300
 opt.hiddenSize = 600
 opt.jackknifeSize = 10
-opt.numEpochs = 10
+opt.numEpochs = 4
 opt.batchSize = 8
 
 -- define gated network graph
@@ -46,6 +46,9 @@ fold_size = math.modf(trainsize / opt.jackknifeSize)
 local x, gradParameters = ged:getParameters()
 
 for fold = 1,opt.jackknifeSize do
+    -- reset model weights for this fold
+    ged:reset()
+
     testdata_thisfold = {}
     traindata_thisfold = {}
     if fold == opt.jackknifeSize then
@@ -72,9 +75,9 @@ for fold = 1,opt.jackknifeSize do
 	    local gates = {}
 	    local targets = {}
 	    for j = t, math.min(t + opt.batchSize - 1, table.getn(traindata_thisfold)) do
-	    	local input = traindata_thisfold[shuffle[j]][1]:resize(1, opt.embedSize)
-	    	local gate = traindata_thisfold[shuffle[j]][2]:resize(1, opt.embedSize)
-	    	local target = traindata_thisfold[shuffle[j]][3]:resize(1, opt.embedSize)
+	    	local input = traindata_thisfold[shuffle[j]][2]:resize(1, opt.embedSize)   -- start at idx 2 because the input word is in the table
+	    	local gate = traindata_thisfold[shuffle[j]][3]:resize(1, opt.embedSize)
+	    	local target = traindata_thisfold[shuffle[j]][4]:resize(1, opt.embedSize)
 		table.insert(inputs, input)
 		table.insert(gates, gate)
 		table.insert(targets, target)
@@ -110,9 +113,10 @@ for fold = 1,opt.jackknifeSize do
     -- predict for this fold
     predictions = {}
     for t = 1, table.getn(testdata_thisfold) do
-        local output = ged:forward({testdata_thisfold[t][1]:resize(1, opt.embedSize), testdata_thisfold[t][2]:resize(1, opt.embedSize)})
-	local target = testdata_thisfold[t][3]:resize(1, opt.embedSize)
-	table.insert(predictions, {output, target})
+    	local input_word = testdata_thisfold[t][1]
+        local output = ged:forward({testdata_thisfold[t][2]:resize(1, opt.embedSize), testdata_thisfold[t][3]:resize(1, opt.embedSize)})
+	local target = testdata_thisfold[t][4]:resize(1, opt.embedSize)
+	table.insert(predictions, {input_word, output, target})
     end
     print("Saving model and predictions")
     torch.save("predict." .. fold, predictions)
