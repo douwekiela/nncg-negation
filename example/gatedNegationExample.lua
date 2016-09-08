@@ -1,3 +1,5 @@
+local cutorch = require "cutorch"
+local cunn = require "cunn"
 local nn = require "nn"
 local nngraph = require "nngraph"
 local optim = require "optim"
@@ -10,6 +12,7 @@ opt.hiddenSize = 600
 opt.jackknifeSize = 10
 opt.numEpochs = 4
 opt.batchSize = 8
+opt.useGPU = true -- use CUDA_VISIBLE_DEVICES to set the GPU you want to use
 
 -- define gated network graph
 ---- declare inputs
@@ -31,7 +34,13 @@ local ged = nn.gModule({word_vector, gate_vector}, {output})
 
 -- define loss function
 print("Defining loss function")
-local loss = nn.MSECriterion() 
+local loss = nn.MSECriterion()
+
+-- GPU mode
+if opt.useGPU then
+    ged:cuda()
+    loss:cuda()
+end
 
 -- read training data
 print("Reading training data")
@@ -78,6 +87,13 @@ for fold = 1,opt.jackknifeSize do
 	    	local input = traindata_thisfold[shuffle[j]][2]:resize(1, opt.embedSize)   -- start at idx 2 because the input word is in the table
 	    	local gate = traindata_thisfold[shuffle[j]][3]:resize(1, opt.embedSize)
 	    	local target = traindata_thisfold[shuffle[j]][4]:resize(1, opt.embedSize)
+
+            if opt.useGPU then
+                input = input:cuda()
+                gate = gate:cuda()
+                target = target:cuda()
+            end
+
 		table.insert(inputs, input)
 		table.insert(gates, gate)
 		table.insert(targets, target)
