@@ -96,6 +96,7 @@ for epoch = 1, opt.numEpochs do
     shuffle = torch.randperm(traindata:size()[1])
     current_loss = 0
     for t = 1, traindata:size()[1], opt.batchSize do
+        print("example number: ", t)
         local inputs = {}
 	local gates = {}
 	local targets = {}
@@ -121,21 +122,21 @@ for epoch = 1, opt.numEpochs do
 
 	local feval = function(w)  -- w = weight vector. returns loss, dloss_dw
 	      gradParameters:zero()
-	      local f = 0  -- for averaging error
-	      for k = 1, #inputs do
-		 local result = ged:forward({inputs[k], gates[k]})
-		 local err = loss_module:forward({result, targets[k], samples[k], 1})
-		 f = f + err
-		 local gradErr =  loss_module:backward({result, targets[k],
-							samples[k], 1},
-		    torch.Tensor{1})
-		 local gradOut, gradTarg, gradSample, gradRank = unpack(gradErr)
-		 ged:backward({inputs[k], gates[k]}, gradOut)
-	      end -- for k = 1, #inputs
+	      inputs = torch.cat(inputs, 1)
+	      gates = torch.cat(gates, 1)
+	      targets = torch.cat(targets, 1)
+	      samples = torch.cat(samples, 1)
+	      ranks = torch.ones(inputs:size(1)):cuda()
+	      
+	      local result = ged:forward({inputs, gates})
+	      local f = loss_module:forward({result, targets, samples, ranks})
+	      local gradErr =  loss_module:backward({result, targets, samples, ranks},
+		 torch.ones(1):cuda())
+	      local gradOut, gradTarg, gradSample, gradRank = unpack(gradErr)
+	      ged:backward({inputs[k], gates[k]}, gradOut)
 
 	      -- normalize gradients and f(X)
-	      gradParameters:div(#inputs)
-	      f = f/(#inputs)
+	      gradParameters:div(inputs:size(1))
 	      return f, gradParameters
 	end -- local feval
 
