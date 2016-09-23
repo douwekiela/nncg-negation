@@ -123,11 +123,14 @@ for epoch = 1, opt.numEpochs do
 	      gradParameters:zero()
 	      local f = 0  -- for averaging error
 	      for k = 1, #inputs do
-	      	  local result = ged:forward({inputs[k], gates[k]})
-		  local err = loss_module:forward({result, targets[k], samples[k], 1})
-		  f = f + err
-		  local gradErr = loss_module:backward({result, targets[k], samples[k], 1})
-		  ged:backward({inputs[k], gates[k]}, gradErr)
+		 local result = ged:forward({inputs[k], gates[k]})
+		 local err = loss_module:forward({result, targets[k], samples[k], 1})
+		 f = f + err
+		 local gradErr =  loss_module:backward({result, targets[k],
+							samples[k], 1},
+		    torch.Tensor{1})
+		 local gradOut, gradTarg, gradSample, gradRank = unpack(gradErr)
+		 ged:backward({inputs[k], gates[k]}, gradOut)
 	      end -- for k = 1, #inputs
 
 	      -- normalize gradients and f(X)
