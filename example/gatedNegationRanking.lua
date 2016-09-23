@@ -43,9 +43,10 @@ local sample_vec = nn.Identity()()
 local rank = nn.Identity()()
 local cos1 = nn.CosineDistance()({out_vec, targ_vec})
 local cos2 = nn.CosineDistance()({out_vec, sample_vec})
-local loss = nn.MarginRankingCriterion()({nn.ParallelTable()
-						:add(nn.Identity())
-						:add(nn.Identity())({cos1, cos2}), rank})
+local parInput = nn.ParallelTable()
+   :add(nn.Identity())
+   :add(nn.Identity())
+local loss = nn.MarginRankingCriterion()({parInput({cos1, cos2}), rank})
 local loss_module = nn.gModule({out_vec, targ_vec, sample_vec, rank}, {loss})
 
 -- GPU mode
