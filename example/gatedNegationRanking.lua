@@ -165,8 +165,8 @@ for t = 1, testdata:size(1) do
     end
     local output = ged:forward({input, gate})
     predFileStream:write(input_word .. "\t[")
-    for k = 1, output:size()[2] do
-    	predFileStream:write(output[t][k] .. ", ")
+    for k = 1, output:size(2) do
+       predFileStream:write(output[1][k] .. ", ")
     end
     predFileStream:write("]\n")
 end
