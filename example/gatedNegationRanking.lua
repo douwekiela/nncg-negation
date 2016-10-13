@@ -11,7 +11,7 @@ opt.gateSize = 300
 opt.hiddenSize = 600
 opt.jackknifeSize = 10
 opt.numEpochs = 1
-opt.batchSize = 8
+opt.batchSize = 100
 opt.useGPU = true -- use CUDA_VISIBLE_DEVICES to set the GPU you want to use
 opt.predFile = "predict.out"
 
@@ -133,7 +133,7 @@ for epoch = 1, opt.numEpochs do
 	      local gradErr =  loss_module:backward({result, targets, samples, ranks},
 		 torch.ones(1):cuda())
 	      local gradOut, gradTarg, gradSample, gradRank = unpack(gradErr)
-	      ged:backward({inputs[k], gates[k]}, gradOut)
+	      ged:backward({inputs, gates}, gradOut)
 
 	      -- normalize gradients and f(X)
 	      gradParameters:div(inputs:size(1))
@@ -152,22 +152,23 @@ end   -- for epoch = 1, opt.numEpochs
 
 -- predict
 print "Predicting"
-
+predFileStream = io.open(opt.predFile, "w") 
 -- module with the first half of the network
-for t = 1, testdata:size()[1] do
+local shuffle = torch.randperm(testdata:size(1))
+for t = 1, testdata:size(1) do
     local input_word = testwords[t]
-    local input = traindata[shuffle[j]]:narrow(1, 1, opt.embedSize):resize(1, opt.embedSize)
-    local gate = traindata[shuffle[j]]:narrow(1, opt.embedSize + 1, opt.embedSize):resize(1, opt.embedSize)
+    local input = testdata[shuffle[t]]:narrow(1, 1, opt.embedSize):resize(1, opt.embedSize)
+    local gate = testdata[shuffle[t]]:narrow(1, opt.embedSize + 1, opt.embedSize):resize(1, opt.embedSize)
     if opt.useGPU then
        input = input:cuda()
        gate = gate:cuda()
     end
     local output = ged:forward({input, gate})
-    opt.predfile:write(input_word .. "\t[")
+    predFileStream:write(input_word .. "\t[")
     for k = 1, output:size()[2] do
-    	opt.predfile:write(output[t][k] .. ", ")
+    	predFileStream:write(output[t][k] .. ", ")
     end
-    opt.predfile:write("]\n")
+    predFileStream:write("]\n")
 end
 print("Saving model")
 torch.save("model.net", ged)
