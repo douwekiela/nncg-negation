@@ -163,10 +163,11 @@ for t = 1, testdata:size(1) do
        input = input:cuda()
        gate = gate:cuda()
     end
-    local output = ged:forward({input, gate})
+    local output = ged:forward({input, gate}):squeeze()
+    print("output", output:size())
     predFileStream:write(input_word .. "\t[")
-    for k = 1, output:size(2) do
-       predFileStream:write(output[1][k] .. ", ")
+    for k = 1, output:size(1) do
+       predFileStream:write(output[k] .. ", ")
     end
     predFileStream:write("]\n")
 end
