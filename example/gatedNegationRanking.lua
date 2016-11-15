@@ -5,6 +5,7 @@ local nngraph = require "nngraph"
 local optim = require "optim"
 local js = require "json"
 local tnt = require "torchnet"
+local moses = require "moses"
 
 -- set gated network hyperparameters
 local opt = {}
@@ -17,8 +18,10 @@ opt.batchSize = 100
 opt.useGPU = true -- use CUDA_VISIBLE_DEVICES to set the GPU you want to use
 opt.predFile = "predict.out"
 opt.trainFile = "data/pairs.txt"
+opt.mcqFile = "data/mcq_dev.txt"
 opt.embedFile = "data/train_combined.json"
 opt.gateFile = "data/train_combined_gates.json"
+opt.evalFreq = 10000
 
 -- define gated network graph
 ---- declare inputs
@@ -100,8 +103,7 @@ function loadPairData(filePath, batchSize)
       batchsize = batchSize,
       dataset = outData,
       merge = function(batch)
-	 local first = function(tab) return tab[1] end
-	 local second = function(tab) return tab[2] end
+	 local index = function(k, tab) return tab[k] end
 	 local mergecl = function(source, closure)
 	    return tnt.utils.table.mergetensor(
 		  tnt.utils.table.foreach{
@@ -111,12 +113,12 @@ function loadPairData(filePath, batchSize)
 	 end
 	 return {
 	    input = {
-	       mergecl("input", first),
-	       mergecl("input", second)
+	       mergecl("input", moses.bind(index, 1)),
+	       mergecl("input", moses.bind(index, 2))
 	    },
 	    target = {
-	       mergecl("target", first),
-	       mergecl("target", second)
+	       mergecl("target", moses.bind(index, 1)),
+	       mergecl("target", moses.bind(index, 2))
 	    }
 	 }
       end
@@ -126,16 +128,106 @@ end
 
 -- load pairs training data
 print("Loading training data...")
-trainPairs = loadPairData(opt.trainFile, opt.batchSize)
+local trainPairs = loadPairData(opt.trainFile, opt.batchSize)
 
+
+function loadMCQData(filePath, batchSize)
+   local outData = tnt.ListDataset{
+      filename = filePath,
+      load = function(line)
+	 local word, candidate1, candidate2, candidate3, candidate4, candidate5, antonym =
+	    line:match("(%S+): (%S+) (%S+) (%S+) (%S+) (%S+) :: (%S+)")
+	 local res = moses.indexOf({candidate1, candidate2, candidate3, candidate4, candidate5}, antonym)
+	 end
+	 return {
+	    input = {{embDict[word],
+		      gateDict[word]},
+	       embDict[candidate1],
+	       embDict[candidate2],
+	       embDict[candidate3],
+	       embDict[candidate4],
+	       embDict[candidate5]
+	       },
+	    target = res
+	 }
+      end
+   }
+   outData = tnt.BatchDataset{
+      batchsize = batchSize,
+      dataset = outData,
+      merge = function(batch)
+	 local index = function(k, tab) return tab[k] end
+	 local mergecl = function(source, closure)
+	    return tnt.utils.table.mergetensor(
+		  tnt.utils.table.foreach{
+		     tbl = batch[source],
+		     closure = closure
+	    })
+	 end
+	 return {
+	    input = {
+	       {tnt.utils.table.mergetensor(
+		  tnt.utils.table.foreach{
+		     tbl =tnt.utils.table.foreach{
+			tbl = batch["input"],
+			closure = moses.bind(index, 1)},
+		     closure = moses.bind(index, 1)}),
+	       tnt.utils.table.mergetensor(
+		  tnt.utils.table.foreach{
+		     tbl = tnt.utils.table.foreach{
+			tbl = batch["input"],
+			closure = moses.bind(index, 1)},
+		     closure = moses.bind(index, 2)
+	       })},
+	       mergecl("input", moses.bind(index, 2)),
+	       mergecl("input", moses.bind(index, 3)),
+	       mergecl("input", moses.bind(index, 4)),
+	       mergecl("input", moses.bind(index, 5)),
+	       mergecl("input", moses.bind(index, 6))
+	    },
+	    target = torch.Tensor(batch["target"])
+	 }
+      end
+   }
+   return tnt.DatasetIterator{dataset = outData}
+end
+
+print("Loading MCQ data...")
+local mcqData = loadMCQData(opt.mcqFile, opt.batchSize)
+local accMeter = tnt.ClassErrorMeter{topk={1}, accuracy = true}
+
+function eval()
+   accMeter:reset()
+   local cos = nn.CosineDistance()
+   if opt.useGPU then cos:cuda() end
+   for example in mcqData() do
+      local input, candidate1, candidate2, candidate3, candidate4, candidate5 = unpack(example["input"])
+      local inputs, gates = unpack(input)
+      local result = ged:forward({inputs, gates})
+      local score = function(vec)
+      	 return cos:forward{result, vec} 
+      end
+      local scores = tnt.utils.table.mergetensor(
+      	 tnt.utils.table.foreach{
+      	    tbl = {candidate1, candidate2, candidate3, candidate4, candidate5},
+      	    closure = score    
+      }):transpose(1, 2)
+      accMeter:add(scores, example["target"])
+   end
+   return accMeter:value()
+end
+
+local accs = {}
 -- train model
 local x, gradParameters = ged:getParameters()
 
 for epoch = 1, opt.numEpochs do
     print("Training epoch", epoch)
-    current_loss = 0
+    local current_loss = 0
+    local acc
     local t = 0
     for example in trainPairs() do
+       print("Batch number ", t)
        local inputs, gates = unpack(example["input"])
        local targets, samples = unpack(example["target"])
        local feval = function(w)  -- w = weight vector. returns loss, dloss_dw
@@ -156,6 +248,11 @@ for epoch = 1, opt.numEpochs do
 
        _, fs = optim.adadelta(feval, x, {rho = 0.9})
        current_loss = current_loss + fs[1]
+       if (t*opt.batchSize) % opt.evalFreq == 0 then
+	  acc = eval()[1]
+	  print("Accuracy: ", acc)
+	  table.insert(accs, {epoch = epoch, t = t*opt.batchSize, acc=acc})
+       end
        t = t + 1
        print("... Avg. loss", current_loss/t)
        
@@ -166,6 +263,8 @@ for epoch = 1, opt.numEpochs do
 
 end   -- for epoch = 1, opt.numEpochs
 
+outfile = io.open("accuracies.json", "w")
+outfile:write(js.encode(accs))
 -- -- predict
 -- print "Predicting"
 -- predFileStream = io.open(opt.predFile, "w") 
