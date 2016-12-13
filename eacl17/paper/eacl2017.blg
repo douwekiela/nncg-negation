@@ -1,0 +1,49 @@
+This is BibTeX, Version 0.99d (TeX Live 2013/Debian)
+Capacity: max_strings=35307, hash_size=35307, hash_prime=30011
+The top-level auxiliary file: eacl2017.aux
+The style file: eacl2017.bst
+Database file #1: eacl2017.bib
+Warning--I didn't find a database entry for "nguyen:16"
+Warning--I didn't find a database entry for "oseaghdha:16"
+You've used 2 entries,
+            2490 wiz_defined-function locations,
+            565 strings with 4814 characters,
+and the built_in function-call counts, 1014 in all, are:
+= -- 104
+> -- 31
+< -- 2
++ -- 11
+- -- 10
+* -- 65
+:= -- 153
+add.period$ -- 8
+call.type$ -- 2
+change.case$ -- 13
+chr.to.int$ -- 2
+cite$ -- 2
+duplicate$ -- 50
+empty$ -- 84
+format.name$ -- 13
+if$ -- 230
+int.to.chr$ -- 1
+int.to.str$ -- 0
+missing$ -- 2
+newline$ -- 15
+num.names$ -- 6
+pop$ -- 19
+preamble$ -- 1
+purify$ -- 15
+quote$ -- 0
+skip$ -- 42
+stack$ -- 0
+substring$ -- 54
+swap$ -- 19
+text.length$ -- 2
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 16
+warning$ -- 0
+while$ -- 8
+width$ -- 3
+write$ -- 31
+(There were 2 warnings)

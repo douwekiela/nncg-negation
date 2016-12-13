@@ -1,0 +1,17 @@
+\begin{thebibliography}{}
+
+\bibitem[\protect\citename{Gorman and Curran}2005]{gorman:05}
+James Gorman and James~R. Curran.
+\newblock 2005.
+\newblock Approximate searching for distributional similarity.
+\newblock In {\em Proceedings of the ACL-SIGLEX Workshop on Deep Lexical
+  Acquisition}, pages 97--104, Ann Arbor.
+
+\bibitem[\protect\citename{Pham \bgroup et al.\egroup }2015]{pham:15}
+N.~Pham, A.~Lazaridou, and M.~Baroni.
+\newblock 2015.
+\newblock A multitask objective to inject lexical contrast into distributional
+  semantics.
+\newblock In {\em Proceedings of ACL}, pages 21--26.
+
+\end{thebibliography}
