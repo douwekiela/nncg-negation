@@ -135,9 +135,9 @@ one-best antonym with high precision.
 \subfigure[CCCRE]{
  \includegraphics[width=0.21\textwidth]{cccre}
 }
-\label{f:arch}
 \vspace{-4mm}
 \caption{Neural network architectures and training signal for (a) RAE \citep{memisevic:13}, (b) Class-Conditional RAE \citet{rudy:15}, and Continuous Class-Conditional RAE (this paper). Figures based on \citet{memisevic:13}.}
+\label{f:arch}
 \end{figure*}
 
 
@@ -204,10 +204,10 @@ Antonym training data was obtained from WordNet \citep{wordnet} (hereafter WN), 
 % We used the antonym relation for WN adjectives, and expanded the initial list of antonym pairs with WN synonyms of each word in the pair. This resulted in approximately 20K (input word, target word) training pairs. 
 We exclude any antonym pair with the input word in the test set.
 
-Gate vectors were obtained under three conditions. In the {\bf
-  standard} condition we use all WN cohyponyms of an input word. If
-there are fewer than ten, we make up the difference with nearest neighbours
-from the 
+Gate vectors were obtained under three
+conditions. In the {\bf standard} condition we use all WN cohyponyms
+of an input word. If there are fewer than ten, we make up the
+difference with nearest neighbours from the
 % original
 vector space. The gate vector is 
 % calculated as 
@@ -222,9 +222,10 @@ In the {\bf unsupervised} gate condition we do not use WN, but rather the ten ne
 % original 
 vector space. 
 % However, the target antonym is still supervised. 
-In the {\bf restricted} condition, we remove all WN cohyponyms of test input words from the training data, e.g. {\it hot, cool, tepid} etc. if {\it cold} is a test word.
+In the {\bf restricted} condition, we use standard gates but remove all WN cohyponyms of test input words from the training data, e.g. {\it hot, cool, tepid} etc. if {\it cold} is a test word.
 % This is to test how important it is to have training examples with similar gates. 
 % For example, if {\it cold} is a test word, we remove {\it hot, cold, tepid, cool} etc. from the training data.
+The input word vector is never part of the centroid, and we use the same gate type at training and test time.
 
 % Hyperparameters including hidden layer size, minibatch size and number of epochs were tuned on the GRE development set. All models were optimized using AdaDelta to minimize Mean Squared Error loss. 
 Hyperparameters were tuned on the GRE development set (Sec~\ref{sec:eval}). All models were optimized using AdaDelta ($\rho = 0.95$) to minimize Mean Squared Error loss. The FF and CCCRE networks have hidden layers of 600 units, while UE has 150 and UE-Concat has 300. Minibatch size was 48 for CCCRE and 16 for all other networks. The linear models were trained for 100 epochs, FF networks for 400, UE for 300, and CCCRE for 200.
@@ -239,15 +240,15 @@ is shown in (\ref{eqn:gre-ex}), where the input word is {\it piquant} and the co
 % restrict the questions to those 
 where both input and target are adjectives.
 
-\vspace{-6mm}
+\vspace{-6.25mm}
 \begin{equation}
 \begin{split}
-\textrm{piquant:\ \ } & \textrm{(a) shocking (b) jovial (c) rigorous} \\[-1mm]
+\textrm{piquant:\ \ } & \textrm{(a) shocking (b) jovial (c) rigorous} \\[-1.5mm]
 & \textrm{(d) merry (e) {\bf bland}}
 \label{eqn:gre-ex}
 \end{split}
 \end{equation}
-\vspace{-6mm}
+\vspace{-6.5 mm}
 
 We evaluate a model by predicting an antonym vector for the input word, and choosing the multiple choice option with the smallest cosine distance to the predicted vector. We report accuracy, i.e. percentage of questions answered correctly.
 
@@ -264,8 +265,8 @@ check them against a gold standard.
 Gold standard antonyms for a word include its antonyms from the test sets and WN. Following \citet{gorman:05}, to minimise false negatives we improve the coverage of the gold standard by expanding it with antonyms from 
 % the online version of 
 Roget's 21st Century Thesaurus, Third
-Edition.\footnote{\url{http://thesaurus.com}} We report precision at
-ranks 1 and 5.
+Edition.\footnote{\url{http://thesaurus.com}} 
+% We report precision at ranks 1 and 5.
 
 
 \section{Results and Discussion}
