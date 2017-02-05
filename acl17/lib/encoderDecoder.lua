@@ -1,19 +1,24 @@
+local cutorch = require "cutorch"
 local nn = require "nn"
 local rnn = require "rnn"
 local cunn = require "cunn"
 local dpnn = require "dpnn"
 local nngraph = require "nngraph"
+local npy4th = require 'npy4th'
 local optim = require "optim"
-local beam = require "beamsearch"
-local pastalog = require "pastalog"
+local beam = require "lib.beamsearch"
 local tnt = require "torchnet"
-require "Replace"
+require "lib.Replace"
 
 local EncoderDecoder, parent = torch.class("EncoderDecoder", "nn.Module")
 
 function EncoderDecoder:__init(inVocab, outVocab,
-			       inEmbedSize, outEmbedSize,
-			       hiddenSize, attention, dropout, gpu)
+			       hiddenSize, attention,
+			       inDropout, outDropout,
+			       gpu, embPath,
+			       trainEmb,
+			       inEmbedSize,
+			       outEmbedSize)
 
    parent.__init(self)
    self.output = {}
@@ -24,23 +29,32 @@ function EncoderDecoder:__init(inVocab, outVocab,
    local outVocabSize = vocabLength(outVocab["forward"])
    print("inVocabSize: ", inVocabSize)
    print("outVocabSize: ", outVocabSize)
-
+   
    -- Lookup tables
+   self.trainEmb = trainEmb
    self.inLookup = nn.LookupTableMaskZero(inVocabSize, inEmbedSize)
-   self.outLookup = nn.LookupTableMaskZero(outVocabSize + 1, outEmbedSize)
-
+   self.outLookup = nn.LookupTableMaskZero(outVocabSize, outEmbedSize)
+      
+   if embPath ~= "." then
+      self:loadEmbedding(embPath, gpu)
+      if not self.trainEmb then
+	 self.inLookup.accGradParameters = function(self, i, o, s) end
+	 self.outLookup.accGradParameters = function(self, i, o, s) end
+      end
+   end
+   
    -- Encoder LSTM
    self.enc = nn.Sequential()
    self.enc:add(self.inLookup)
-   if dropout > 0. then
-      self.enc:add(nn.Dropout(dropout))
+   if inDropout > 0. then
+      self.enc:add(nn.Dropout(inDropout))
    end
-   self.enc.lstmLayers = nn.SeqLSTM(inEmbedSize, hiddenSize)
+   self.enc.lstmLayers = nn.SeqLSTM(inEmbedSize, hiddenSize) 
    self.enc.lstmLayers:maskZero()
    self.enc:add(self.enc.lstmLayers)
-   if dropout > 0. then
-      self.enc:add(nn.Dropout(dropout))
-   end
+   -- if dropout > 0. then
+   --    self.enc:add(nn.Dropout(dropout))
+   -- end
    self.enc:add(nn.Transpose({1, 2}))
 
 
@@ -48,8 +62,8 @@ function EncoderDecoder:__init(inVocab, outVocab,
 
    self.dec = nn.Sequential()
    self.dec:add(self.outLookup)
-   if dropout > 0 then
-      self.dec:add(nn.Dropout(dropout))
+   if outDropout > 0 then
+      self.dec:add(nn.Dropout(outDropout))
    end
    self.dec.lstmLayers = {}
    table.insert(self.dec.lstmLayers, nn.SeqLSTM(outEmbedSize, hiddenSize))
@@ -59,9 +73,9 @@ function EncoderDecoder:__init(inVocab, outVocab,
       self.dec.lstmLayers[i]:maskZero()
       self.dec:add(self.dec.lstmLayers[i])
    end
-   if dropout > 0 then
-      self.dec:add(nn.Dropout(dropout))
-   end
+   -- if dropout > 0 then
+   --    self.dec:add(nn.Dropout(dropout))
+   -- end
    self.dec:add(nn.SplitTable(1))
 
    -- Attention and Generator
@@ -118,7 +132,6 @@ function EncoderDecoder:__init(inVocab, outVocab,
       --self.criterion:cuda()
    end
 
-   -- TODO: add generator weights
    -- get weights and weight gradients
    local encWeights, encGradWeights = self.enc:parameters()
    local decWeights, decGradWeights = self.dec:parameters()
@@ -133,11 +146,10 @@ function EncoderDecoder:__init(inVocab, outVocab,
    end
 
    -- beam search
-   self.beamSearcher = BeamSearch(10, 300, self.outVocab["reverse"]["('shift', '-')"],
-				  self.outVocab["reverse"]["<END>"],
-				  self.outVocab["reverse"]["<END>"])
-   self.startSymbol = self.outVocab["reverse"]["('shift', '-')"]
-   self.endSymbol = self.outVocab["reverse"]["('right-arc', 'root')"]
+   self.startSymbol = self.outVocab["reverse"]["<START>"]
+   self.endSymbol = self.outVocab["reverse"]["<END>"]
+   self.beamSearcher = BeamSearch(10, 300, self.startSymbol,
+				  self.endSymbol, self.startSymbol)
    self.stateFunc = function()
       out = {}
       for i = 1,#self.dec.lstmLayers do
@@ -153,6 +165,17 @@ function EncoderDecoder:__init(inVocab, outVocab,
       end
    end
 
+end
+
+function EncoderDecoder:regenerateBeam(beamSize, maxLength)
+   self.beamSearcher = BeamSearch(beamSize, maxLength, self.startSymbol,
+				  self.endSymbol, self.startSymbol)
+end
+
+function EncoderDecoder:forgetStates()
+   for i, layer in pairs(self.dec.lstmLayers) do
+      layer._remember = 'neither'
+   end
 end
 
 function append(t1, t2)
@@ -172,7 +195,7 @@ function EncoderDecoder:zeroGradParameters()
    self.gradWeights:zero()
 end
 
-function EncoderDecoder:greedy(input, maxLength)
+function EncoderDecoder:greedy(input, gate, maxLength)
    local i = 1
    local symbol = self.startSymbol
    local sequence = {symbol}
@@ -192,27 +215,38 @@ function EncoderDecoder:greedy(input, maxLength)
       table.insert(sequence, symbol)
       i = i+1
    end
+   self.dec:forget()
+   self.generator:forget()
+   self:forgetStates()
    return sequence
 end
 
 function EncoderDecoder:forward(input)
-   local encInSeq, decInSeq = unpack(input)
+   local encInSeq, decInSeq, _ = unpack(input)
    local inSeqLen = encInSeq:size(1)
    local encOut = self.enc:forward(encInSeq)
+   self.dec:forget()
+   self.generator:forget()
    forwardConnect(self.enc, self.dec, inSeqLen)
+   self.dec:remember()
+   self.generator:remember()
    local decOut = self.dec:forward(decInSeq)
    self.output = self.generator:forward({encOut, decOut})
    return self.output
 end
 
 function EncoderDecoder:backward(input, gradOutput)
-   local encInSeq, decInSeq = unpack(input)
+   local encInSeq, decInSeq, _ = unpack(input)
    local encOut = self.enc.output
    local decOut = self.dec.output
    local grads = self.generator:backward({encOut, decOut}, gradOutput)
    local encGrad, decGrad = unpack(grads)
    local decInGrad = self.dec:backward(decInSeq, decGrad)
+   self.dec:forget()
+   self.generator:forget()
    backwardConnect(self.enc, self.dec)
+   self.dec:remember()
+   self.generator:remember()
    local encInGrad = self.enc:backward(encInSeq, encGrad)
    self.gradInput = {encInGrad, decInGrad}
    return self.gradInput
@@ -235,12 +269,138 @@ function EncoderDecoder:eval(dataIterator)
    return torch.cmul(numSamples, errs):sum()/numSamples:sum()
 end
 
-function EncoderDecoder:generate(input)
+function EncoderDecoder:generate(input, gate, beamSize, maxLen)
+   local tabCopy = function(tab)
+      local copy = {}
+      for i, elt in pairs(tab) do
+	 copy[i] = elt
+      end
+      return copy
+   end
+   local ij = function(k, n)
+      local i, j
+      j = torch.fmod(torch.Tensor{k}, n)[1]
+      j = (j==0) and n or j
+      i = (k-j)/n + 1
+      return i, j
+   end
+   local dimH = self.dec.lstmLayers[1].hiddensize
+   local numLayers = #self.dec.lstmLayers
    local encOut = self.enc:forward(input)
-   forwardConnect(self.enc, self.dec, seqLen)
-   out = self.beamSearcher:search(self.dec, self.stateFunc, self.copyFunc)
+   self.dec:forget()
+   self.generator:forget()
+   forwardConnect(self.enc, self.dec, input:size(1))
+   self.dec:remember()
+   self.generator:remember()
+   local beam = {}
+   local complete = {}
+   local pruneFactor = torch.log(0)
 
-   return out["y"]
+   local decOut = self.dec:forward(torch.Tensor{self.startSymbol}:resize(1, 1))
+   local scores = self.generator:forward({encOut, decOut})
+   local topScores, topIds = scores:sort(3,true)
+   local dimWord = scores:size(3)
+   
+
+   for i=1,beamSize do
+   local id, score =  topIds[{1, 1, i}], topScores[{1, 1, i}]
+   local state = {}
+   for j=1,numLayers do
+	 state[j] = {cell = torch.CudaTensor(1, dimH):copy(self.dec.lstmLayers[j].cell),
+		     output = torch.CudaTensor(1, dimH):copy(self.dec.lstmLayers[j].output)}
+   end
+   if id == self.endSymbol then
+	 table.insert(complete, {seq = {self.startSymbol, id},
+				 score = score}) 
+	 pruneFactor = score
+      else
+	 table.insert(beam, {seq = {self.startSymbol, id},
+			     state = state,
+			     score = score})
+      end
+   end
+   
+   local counter = 1
+   while (#beam > 0) and (counter<maxLen) do
+      -- Copy states
+      local beamSymbols, beamStates = {}, {}
+      
+      for l=1,numLayers do
+	 beamStates[l] = {cell = {}, output = {}}
+      end
+      
+      for j=1,#beam do
+	 beamSymbols[j] = beam[j]["seq"][#beam[j]["seq"]]
+	 for k=1,numLayers do
+	    beamStates[k]["cell"][j] = beam[j]["state"][k]["cell"]
+	    beamStates[k]["output"][j] = beam[j]["state"][k]["output"]
+	 end
+      end
+      
+      beamSymbols = torch.Tensor(beamSymbols):resize(1, #beam)
+      for m=1,numLayers do
+	 beamStates[m]["cell"] = torch.cat(beamStates[m]["cell"], 1):resize(#beam, dimH)
+	 beamStates[m]["output"] = torch.cat(beamStates[m]["output"], 1):resize(#beam, dimH)
+      end
+      
+      -- Calculate probabilities
+      self.dec:forget()
+      self.generator:forget()
+      self:copyDecState(beamStates)
+  
+ 
+      local decOut = self.dec:forward(beamSymbols)
+      local scores = self.generator:forward({encOut, decOut}):resize(#beam, dimWord)
+
+      local dimBeam, dimWord = scores:size(1), scores:size(2)
+      assert(dimBeam == #beam, "Batch size must equal beam size.")
+      local flatScores = scores:view(scores:nElement())
+      local topScores, topIds = flatScores:sort(1, true)
+      local outStates = {}
+
+      for n=1,#beam do
+	 local layerStates = {}
+	 for p=1,numLayers do
+	    layerStates[p] = {cell = torch.CudaTensor(1, dimH):copy(self.dec.lstmLayers[p].cell[{{}, n, {}}]),
+			      output = torch.CudaTensor(1, dimH):copy(self.dec.lstmLayers[p].output[{{}, n, {}}])}
+	 end
+	 outStates[n] = layerStates
+      end
+      
+      -- Update beam
+      local newBeam = {}
+      for id=1,math.min(beamSize, #beam) do
+	 local score = topScores[{id}]
+	 local i, j = ij(topIds[id], dimWord)
+
+	 if score>=pruneFactor then
+	    local seq = tabCopy(beam[i]["seq"])
+	    table.insert(seq, j)
+	    if j==self.endSymbol then 
+	       table.insert(complete, {seq = seq,
+				       score = beam[i]["score"] + score}) 
+	       pruneFactor = score
+	    else
+	       table.insert(newBeam, {seq = seq,
+				      state = outStates[i],
+				      score = beam[i]["score"]+ score})
+	    end
+	 else
+	    break
+	 end
+      end
+      beam = newBeam
+      counter = counter + 1
+   end
+
+   return complete[#complete]["seq"]
+end
+
+function EncoderDecoder:copyDecState(states)
+   for i, state in pairs(states) do
+      self.dec.lstmLayers[i].userPrevOutput = state["output"]
+      self.dec.lstmLayers[i].userPrevCell = state["cell"]
+   end
 end
 
 function EncoderDecoder:decodeVocab(input, inp)
@@ -261,10 +421,23 @@ function EncoderDecoder:decodeVocab(input, inp)
    return res
 end
 
+function EncoderDecoder:loadEmbedding(filename, gpu)
+   local emb = npy4th.loadnpy(filename):double()
+   emb = torch.cat({torch.zeros(1, self.inLookup.weight:size(2)),
+		    torch.rand(2, self.inLookup.weight:size(2)),
+		    emb}, 1)
+   -- if gpu then
+   --    emb = emb:cuda()
+   -- end
+   print("emb: ", type(emb), emb:size())
+   self.inLookup.weight = torch.Tensor(emb:size(1), emb:size(2)):copy(emb):double()
+   self.outLookup.weight = torch.Tensor(emb:size(1), emb:size(2)):copy(emb):double()
+end
+
 -- Forward coupling: Copy encoder cell and output to decoder LSTM
 function forwardConnect(enc, dec, seqLen)
-   dec.lstmLayers[1].userPrevOutput = enc.lstmLayers.output[seqLen]
-   dec.lstmLayers[1].userPrevCell = enc.lstmLayers.cell[seqLen]
+	 dec.lstmLayers[1].userPrevOutput = enc.lstmLayers.output[seqLen]
+	 dec.lstmLayers[1].userPrevCell = enc.lstmLayers.cell[seqLen]
 end
 
 function backwardConnect(enc, dec)
