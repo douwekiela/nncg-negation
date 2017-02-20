@@ -81,6 +81,7 @@ function padMerge(batchTable)
    local getContext = tabGetn(3)
    local inputTable, contextTable = getInput(batchTable["input"]), getContext(batchTable["input"]) 
    local outputTable, targetTable = getOutput(batchTable["input"]), batchTable["target"]
+   print("contexttable:", contextTable)
    local mergeContext = tnt.utils.table.mergetensor(contextTable)
    local mergeInput, mergeOutput, mergeTarget= padBatch(inputTable), padBatch(outputTable), padBatch(targetTable)
    return {input = {mergeInput,
@@ -102,30 +103,36 @@ function mergeEval(cuda, batchTable)
  
    local gold, noise  = getFirst(batchTable["input"]), getSecond(batchTable["input"])
 
-   print("batching gold")
    local batchGoldInput = padBatch(getFirst(gold))
    local batchGoldOutput = padBatch(tabSliceOutput(getSecond(gold)))
    local batchGoldTarget = padBatch(tabSliceTarget(getSecond(gold)))
    local batchGoldContext = tnt.utils.table.mergetensor(getThird(gold))
 
-   print("batching noise")
    local noiseInput, noiseNoise, noiseContext = getFirst(noise), getSecond(noise), getThird(noise)
    local batchNoiseInput = padBatch(noiseInput)
    local batchNoiseContext = tnt.utils.table.mergetensor(noiseContext)
-   local lenNoise = #noiseNoise[1]
-   print("lenNoise:", lenNoise)
-   local batchNoiseNoise = {}
-   local batchNoiseTarget = {}
-   for i=1,lenNoise do
-      local noises = tabGetn(i)(noiseNoise)
-      --print("noises", noises)
-      batchNoiseNoise[i] = padBatch(tabSliceOutput(noises))
-      batchNoiseTarget[i] = padBatch(tabSliceTarget(noises))
+   local batchNoiseNoise, batchNoiseTarget
+   if type(noiseNoise[1]) == "table" then
+      local lenNoise = #noiseNoise[1]
+      batchNoiseNoise = {}
+      batchNoiseTarget = {}
+      for i=1,lenNoise do
+	 local noises = tabGetn(i)(noiseNoise)
+	 --print("noises", noises)
+	 batchNoiseNoise[i] = padBatch(tabSliceOutput(noises))
+	 batchNoiseTarget[i] = padBatch(tabSliceTarget(noises))
+	 if cuda then
+	    batchNoiseNoise[i],  batchNoiseTarget[i] = batchNoiseNoise[i]:cuda(),  batchNoiseTarget[i]:cuda()
+	 end
+      end
+   else
+      batchNoiseNoise = padBatch(tabSliceOutput(noiseNoise))
+      batchNoiseTarget = padBatch(tabSliceTarget(noiseNoise))
       if cuda then
-	 batchNoiseNoise[i],  batchNoiseTarget[i] = batchNoiseNoise[i]:cuda(),  batchNoiseTarget[i]:cuda()
+	 batchNoiseNoise = batchNoiseNoise:cuda()
+	 batchNoiseTarget = batchNoiseTarget:cuda()
       end
    end
-
    local batchTarget = torch.cat(batchTable["target"]) 
    
    if cuda then
@@ -149,6 +156,11 @@ function mergeEval(cuda, batchTable)
    }
 end
 
+function noiseId(idx, maxLim)
+   local outIdx =  torch.random(1, maxLim)
+   return (outIdx == idx) and noiseId(idx, maxLim) or outIdx
+end
+
 function loadDataset(outData, batchSize, cuda, eval)
    print("Loading data")
    local compare = function(v1, v2)
@@ -161,7 +173,7 @@ function loadDataset(outData, batchSize, cuda, eval)
    if eval then
       mergeFunc = moses.bind(mergeEval, cuda)
    else
-      mergeFunc = padMerge
+      mergeFunc = moses.bind(mergeEval, cuda)
    end
    table.sort(outData, compare)
    outDataset = tnt.ShuffleDataset{
@@ -178,9 +190,12 @@ function loadDataset(outData, batchSize, cuda, eval)
 		     target = torch.Tensor({1})
 		  }
 	       else
+		  local noiseIdx = noiseId(idx, #outData)
+		  local gold = {outData[idx]["input"], outData[idx]["output"], outData[idx]["context"]}
+		  local noise = {outData[idx]["input"], outData[noiseIdx]["output"], outData[idx]["context"]}
 		  out = {
-		     input = {outData[idx]["input"], outData[idx]["output"][{{1, -2}}], outData[idx]["context"]},
-		     target = outData[idx]["output"][{{2, -1}}]
+		     input = {gold, noise},
+		     target = torch.Tensor({1})
 		  }
 	       end  
 	       return out

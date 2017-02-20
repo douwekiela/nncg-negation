@@ -221,6 +221,18 @@ function EncoderDecoder:greedy(input, gate, maxLength)
    return sequence
 end
 
+function EncoderDecoder:customClone()
+   local clone = self:clone()
+   clone.inLookup = self.inLookup:clone("weight")
+   clone.inLookup = self.inLookup:clone("weight")
+   clone.enc = self.enc:clone("weight", "bias")
+   clone.dec = self.dec:clone("weight", "bias")
+   clone.inLookup.accGradParameters = function(self, i, o, s) end
+   clone.outLookup.accGradParameters = function(self, i, o, s) end
+   clone.generator = self.generator:clone("weight", "bias")
+   return clone
+end
+
 function EncoderDecoder:forward(input)
    local encInSeq, decInSeq, _ = unpack(input)
    local inSeqLen = encInSeq:size(1)
@@ -252,21 +264,27 @@ function EncoderDecoder:backward(input, gradOutput)
    return self.gradInput
 end
 
+function EncoderDecoder:gradUpdate(input, gradOutput)
+   local encInSeq, decInSeq, _ = unpack(input)
+   local output, encOut, decOut = self:forward(input)
+   self:backward(input, encOut, decOut, gradOutput)
+end
+
 
 function EncoderDecoder:eval(dataIterator)
-   local numSamples = {}
-   local errs = {}
+	 local numSamples = {}
+	 local errs = {}
 
-   for input, output, SO in dataIterator do
+	 for input, output, SO in dataIterator do
       table.insert(numSamples, input:size(2))
       local err, _, _ = self:forward(input, output, SO)
       table.insert(errs, math.exp(err/output:size(1)))
    end
 
-   numSamples = torch.Tensor(numSamples)
-   errs = torch.Tensor(errs)
+	 numSamples = torch.Tensor(numSamples)
+	 errs = torch.Tensor(errs)
 
-   return torch.cmul(numSamples, errs):sum()/numSamples:sum()
+	 return torch.cmul(numSamples, errs):sum()/numSamples:sum()
 end
 
 function EncoderDecoder:generate(input, gate, beamSize, maxLen)
@@ -429,7 +447,6 @@ function EncoderDecoder:loadEmbedding(filename, gpu)
    -- if gpu then
    --    emb = emb:cuda()
    -- end
-   print("emb: ", type(emb), emb:size())
    self.inLookup.weight = torch.Tensor(emb:size(1), emb:size(2)):copy(emb):double()
    self.outLookup.weight = torch.Tensor(emb:size(1), emb:size(2)):copy(emb):double()
 end
