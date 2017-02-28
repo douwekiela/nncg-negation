@@ -27,14 +27,14 @@ function EncoderDecoder:__init(inVocab, outVocab,
    self.outVocab = outVocab
    local inVocabSize = vocabLength(inVocab["forward"])
    local outVocabSize = vocabLength(outVocab["forward"])
-   print("inVocabSize: ", inVocabSize)
-   print("outVocabSize: ", outVocabSize)
+   --  print("inVocabSize: ", inVocabSize)
+   --  print("outVocabSize: ", outVocabSize)
    
    -- Lookup tables
    self.trainEmb = trainEmb
    self.inLookup = nn.LookupTableMaskZero(inVocabSize, inEmbedSize)
    self.outLookup = nn.LookupTableMaskZero(outVocabSize, outEmbedSize)
-      
+   --  print("trainEmb", not self.trainEmb)
    if embPath ~= "." then
       self:loadEmbedding(embPath, gpu)
       if not self.trainEmb then
@@ -82,7 +82,7 @@ function EncoderDecoder:__init(inVocab, outVocab,
    self.attention = attention
    --self.attention = nn.Recursor(Attention(hiddenSize, hiddenSize, hiddenSize))
    if self.attention then
-      print("Using attention.")
+      --     print("Using attention.")
       local inputs = {nn.Identity()(), nn.Identity()()}
       local cxt = Attention(inputs, hiddenSize, false)
 
@@ -102,7 +102,7 @@ function EncoderDecoder:__init(inVocab, outVocab,
 	 :add(nn.JoinTable(1))
 
    else
-      print("Using no attention.")
+      --      print("Using no attention.")
       self.generator = nn.Sequential()
 	 :add(nn.SelectTable(2))
 	 :add(nn.Sequencer(
@@ -125,6 +125,7 @@ function EncoderDecoder:__init(inVocab, outVocab,
 
    -- run on GPU
    if gpu then
+      print("Copying model to GPU...")
       self.enc:cuda()
       self.dec:cuda()
       self.generator:cuda()
@@ -134,13 +135,17 @@ function EncoderDecoder:__init(inVocab, outVocab,
 
    -- get weights and weight gradients
    local encWeights, encGradWeights = self.enc:parameters()
+   --   print("weights", encWeights)
+   --   print("grads", encGradWeights)
    local decWeights, decGradWeights = self.dec:parameters()
+   --   print("weights", decWeights, "grads", decGradWeights)
    local genWeights, genGradWeights = self.generator:parameters()
+   --   print("weights", genWeights, "grads", genGradWeights)
    local weights = append(append(encWeights, decWeights), genWeights)
    local gradWeights = append(append(encGradWeights, decGradWeights), genGradWeights)
    self.weights = nn.Module.flatten(weights)
    self.gradWeights = nn.Module.flatten(gradWeights)
-
+   --print("weights", self.weights:size(), "grads", self.gradWeights:size())
    self.paramFun = function()
       return self.weights, self.gradWeights
    end
@@ -264,27 +269,21 @@ function EncoderDecoder:backward(input, gradOutput)
    return self.gradInput
 end
 
-function EncoderDecoder:gradUpdate(input, gradOutput)
-   local encInSeq, decInSeq, _ = unpack(input)
-   local output, encOut, decOut = self:forward(input)
-   self:backward(input, encOut, decOut, gradOutput)
-end
-
 
 function EncoderDecoder:eval(dataIterator)
-	 local numSamples = {}
-	 local errs = {}
+   local numSamples = {}
+   local errs = {}
 
-	 for input, output, SO in dataIterator do
+   for input, output, SO in dataIterator do
       table.insert(numSamples, input:size(2))
       local err, _, _ = self:forward(input, output, SO)
       table.insert(errs, math.exp(err/output:size(1)))
    end
 
-	 numSamples = torch.Tensor(numSamples)
-	 errs = torch.Tensor(errs)
+   numSamples = torch.Tensor(numSamples)
+   errs = torch.Tensor(errs)
 
-	 return torch.cmul(numSamples, errs):sum()/numSamples:sum()
+   return torch.cmul(numSamples, errs):sum()/numSamples:sum()
 end
 
 function EncoderDecoder:generate(input, gate, beamSize, maxLen)
@@ -321,13 +320,13 @@ function EncoderDecoder:generate(input, gate, beamSize, maxLen)
    
 
    for i=1,beamSize do
-   local id, score =  topIds[{1, 1, i}], topScores[{1, 1, i}]
-   local state = {}
-   for j=1,numLayers do
+      local id, score =  topIds[{1, 1, i}], topScores[{1, 1, i}]
+      local state = {}
+      for j=1,numLayers do
 	 state[j] = {cell = torch.CudaTensor(1, dimH):copy(self.dec.lstmLayers[j].cell),
 		     output = torch.CudaTensor(1, dimH):copy(self.dec.lstmLayers[j].output)}
-   end
-   if id == self.endSymbol then
+      end
+      if id == self.endSymbol then
 	 table.insert(complete, {seq = {self.startSymbol, id},
 				 score = score}) 
 	 pruneFactor = score
@@ -365,8 +364,8 @@ function EncoderDecoder:generate(input, gate, beamSize, maxLen)
       self.dec:forget()
       self.generator:forget()
       self:copyDecState(beamStates)
-  
- 
+      
+      
       local decOut = self.dec:forward(beamSymbols)
       local scores = self.generator:forward({encOut, decOut}):resize(#beam, dimWord)
 
@@ -442,11 +441,11 @@ end
 function EncoderDecoder:loadEmbedding(filename, gpu)
    local emb = npy4th.loadnpy(filename):double()
    emb = torch.cat({torch.zeros(1, self.inLookup.weight:size(2)),
-		    torch.rand(2, self.inLookup.weight:size(2)),
 		    emb}, 1)
    -- if gpu then
    --    emb = emb:cuda()
    -- end
+   --    -- print("emb: ", type(emb), emb:size())
    self.inLookup.weight = torch.Tensor(emb:size(1), emb:size(2)):copy(emb):double()
    self.outLookup.weight = torch.Tensor(emb:size(1), emb:size(2)):copy(emb):double()
 end
@@ -503,3 +502,4 @@ function Attention(inputs, hiddenSize, return_weights)
       return context_output
    end
 end
+
