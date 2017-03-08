@@ -119,7 +119,7 @@ def main(opts):
             optimizer.step()
             log.post('loss', value=loss.data[0], step=j)
 
-    pkl.dump(model, bz2.BZ2File(opts.model_name + ".pkl.bz2", "wb"))
+    th.save(model, opts.model_name + ".model.pt")
    
 if __name__=="__main__":
     parser = ArgumentParser()
