@@ -128,13 +128,13 @@ class DecoderRNN(nn.Module):
         tokens = self.vocab.decode(ids)
         return tokens
     
-    def temperature_sample(self, h0, c0, temp=1, max_length=20):
+    def temperature_sample(self, h0, c0, temp=1, max_length=20, **kwargs):
         pass
 
-    def greedy_decode(self, h0, c0, max_length=20):
+    def greedy_decode(self, h0, c0, max_length=20, **kwargs):
         pass
 
-    def beam_decode(self, h0, c0, beam_size=5, max_length=20):
+    def beam_decode(self, h0, c0, beam_size=5, max_length=10, cuda=False, **kwargs):
         def get_ij(idx, n):
             j = idx % n
             i = (idx - j)/n
@@ -145,6 +145,9 @@ class DecoderRNN(nn.Module):
 
         start_symbol = Variable(th.LongTensor([self.start_idx]))
         beam_symbols = start_symbol.unsqueeze(1)
+        if cuda:
+            start_symbol = start_symbol.cuda()
+            beam_symbols = beam_symbols.cuda()
         scores, out_h, out_c = self.forward(beam_symbols, h0, c0)
         top_scores, top_ids = scores.view(scores.numel()).sort(0, True)
         _, dim_beam, dim_vocab = scores.size()
@@ -152,6 +155,8 @@ class DecoderRNN(nn.Module):
      
         for idx in range(min(beam_size, dim_vocab)):
             i, j = get_ij(top_ids[idx], dim_vocab)
+            if cuda:
+                j = j.cuda()
             seq = th.cat([start_symbol, j])
             score = top_scores[idx]
             if j.data[0] == self.end_idx:
@@ -228,15 +233,20 @@ class Seq2Seq(nn.Module):
         log_probs, _, _ = self.decoder(output, transfer_h, transfer_c, lens=output_lens)
         return log_probs
 
-    def generate(self, input_seq, method="beam", **kwargs):
-        input_ids = in_vocab.encode(input_seq.split(" "))
-        input = Variable(th.LongTensor(input_ids)).unsqueeze(0).unsqueeze(0)
+    def generate(self, input_seq, method="beam", cuda=False, **kwargs):
+        input_ids = self.in_vocab.encode(input_seq.split(" "))
+        input = Variable(th.LongTensor(input_ids)).unsqueeze(0)
         h0 = Variable(th.zeros(1, 1, self.hidden_dim).contiguous())
         c0 = Variable(th.zeros(1, 1, self.hidden_dim).contiguous())
+        if cuda:
+            input = input.cuda()
+            h0 = h0.cuda()
+            c0 = c0.cuda()
         input_encoded, input_h, input_c = self.encoder(input, h0, c0)
-        transfer_h, transfer_c = self.transfer(input_h, input_c, *args)
-        output = self.decoder.generate(transfer_h, transfer_c, method=method, **kwargs)
+        transfer_h, transfer_c = self.transfer(input_h, input_c, **kwargs)
+        output = self.decoder.generate(transfer_h, transfer_c, method=method, cuda=cuda, **kwargs)
         return " ".join(output)
+
 
 class IdentityTransfer(nn.Module):
     def __init__(self):
