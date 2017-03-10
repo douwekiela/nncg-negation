@@ -276,7 +276,52 @@ class GatedBilinearTransfer(nn.Module):
         return h, c
 
         
+class PairClassifier(nn.Module):
+    """
+    A classifier for pairs of sequences.
+    """
 
+    def __init__(self, voab_1, vocab_2, embed_dim_1, embed_dim_2,
+                 hidden_dim, class_dim, pair_encoder, n_layers,
+                 n_classes, class_hidden_dim):
+        
+        super(PairClassifier, self).__init__()
+        self.first_encoder = EncoderRNN(vocab_1, embed_dim_1, hidden_dim)
+        self.second_encoder = EncoderRNN(vocab_2, embed_dim_2, hidden_dim)
+        self.pair_encoder = pair_encoder
+        
+        self.classifier = nn.Sequential(nn.Linear(class_dim, class_hidden_dim), nn.Tanh())
+        
+        for i in range(n_layers):
+            self.classifier.add(nn.Linear(class_hidden_dim, class_hidden_dim))
+            self.classifier.add(nn.Tanh())
+            
+        self.classifier.add(nn.Linear(class_hidden_dim, n_classes))
+        self.classifier.add(nn.LogSoftmax())
+            
+
+    def forward(self, input_1, input_2):
+        h_1, hn_1, cn_1 = self.first_encoder(input1)
+        h_2, hn_2, cn_2 = self.second_encoder(input2)
+        encoded = self.pair_encoder(h_1, hn_1, cn_1, h_2, hn_2, cn_2)
+        probs = self.classifier(encoded)
+        return probs
+
+
+
+class ConcatPairClassifier(PairClassifier):
+    """
+    A classifier for pairs of sequences that embeds and then concatenates them.
+    """
+
+    def __init__(self, voab_1, vocab_2, embed_dim_1, embed_dim_2,
+                 hidden_dim, n_layers, n_classes, class_hidden_dim):
+
+        #TODO add code for concatenation-based `pair_encoder`
+        
+        super(PairClassifier, self).__init__(voab_1, vocab_2, embed_dim_1, embed_dim_2,
+                                             hidden_dim, class_dim, pair_encoder, n_layers,
+                                             n_classes, class_hidden_dim)
         
         
     
