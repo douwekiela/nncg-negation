@@ -13,8 +13,8 @@ class Vocabulary(object):
         self.tokens = tokens
         self.unk_idx = unk_idx
         self.vocab_size = len(tokens)
-        self.forward_dict = dict((token, i) for i, token in enumerate(tokens, 1))
-        self.backward_dict = dict(enumerate(tokens, 1))
+        self.forward_dict = dict((token, i) for i, token in enumerate(tokens))
+        self.backward_dict = dict(enumerate(tokens))
 
     def encode(self, tokens):
         return [self.forward_dict.get(token, self.unk_idx) for token in tokens]

@@ -75,10 +75,15 @@ def main(opts):
         transfer = IdentityTransfer()
 
     print("Loading vocabulary")
-    vocab = Vocabulary(js.load(open(opts.vocab_file, "r"))["reverse"].keys(),
-                       opts.unk_idx)
+    js_vocab = js.load(open(opts.vocab_file, "r"))
+    vocab_list = ["<PAD>"]
+    for i in range(1, len(js_vocab["forward"])+1):
+        vocab_list.append(js_vocab["forward"][str(i)])
+        
+    vocab = Vocabulary(vocab_list, opts.unk_idx)
     print("Loading weights")
     weights = th.from_numpy(np.load(opts.embed_file))
+    weights = th.cat([th.zeros(1, opts.embed_dim).double(), weights])
     print("Creating model")
     model = Seq2Seq(in_vocab=vocab, out_vocab=vocab,
                     in_embed_dim=opts.embed_dim,
@@ -87,8 +92,37 @@ def main(opts):
                     transfer=transfer)
     model.encoder.load_embeddings(weights, fix_weights=True)
     model.decoder.load_embeddings(weights, fix_weights=True)
-    
+
+    if opts.test_vocab:
+        print("Testing vocab.")
+        w2v_file = '/local/filespace/am2156/nncg/GoogleNews-vectors-negative300.bin'
+        print("Loading word2vec.")
+        w2v = word2vec.Word2Vec.load_word2vec_format(w2v_file, binary=True)
+        print("Testing word2vec.")
+        for word in tqdm(vocab_list, desc="Words"):
+            if word in w2v:
+                w2v_vec = w2v[word]
+                word_idx = model.in_vocab.forward_dict[word]
+                torch_vec = model.encoder.embedding.weight.data[word_idx].numpy()
+                if not np.array_equal(w2v_vec, torch_vec):
+                    print("Embedding test failure:", word)
+            else:
+                print("{} not in word2vec.".format(word))
+                    
     criterion = nn.NLLLoss()
+    if opts.objective=="dual":
+        margin_criterion = nn.MarginRankingLoss()
+        scorer_nll = nn.NLLLoss()
+        def score_sequence(log_probs, seq_lens, targets):
+            scores = []
+            for i in range(len(seq_lens)):
+                log_prob = log_probs[:,i,:]
+                target = targets[i, :seq_lens[i]]
+                score = scorer_nll(log_prob, target)
+                scores.append(score)
+            scores = th.cat(scores)
+            return scores
+        
     optimizer = optim.Adam(ifilter(lambda param: param.requires_grad,
                                    model.parameters()),
                            lr=1e-2)
@@ -139,8 +173,12 @@ if __name__=="__main__":
     parser.add_argument("--transfer", dest="transfer", default="identity")
     parser.add_argument("--transfer_target", dest="transfer_target",
                         default="h")
+    parser.add_argument("--objective", dest="objective", default="single")
+    parser.add_argument("--margin", dest="margin", default=0.7, type=float)
+    parser.add_argument("--margin_weight", dest="margin_weight", default=1.5, type=float)
     parser.add_argument("--vocab_file", dest="vocab_file",
                         default="data/vocab.json")
+    parser.add_argument("--test_vocab", dest="test_vocab", action="store_true", default=False)
     parser.add_argument("--unk_idx", dest="unk_idx", default=3, type=int)
     parser.add_argument("--log_port", dest="log_port", default=9000)
     
